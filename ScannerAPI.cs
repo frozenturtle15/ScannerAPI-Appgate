@@ -22,16 +22,13 @@ namespace ScannerAPI
     public class AVScan
     {
 
-        jsonScanResult scanResult;
-        FileStream responseFileStream;
-        MemoryStream responseMemoryStream;
         ILogger log;
-
         public static string ICAPServer { get; set; } = "54.89.242.83";
         public static string ICAPClient { get; set; } = "192.168.0.1";
         public static string sICAPPort { get; set; } = "1344";
         public static string ICAPServiceName = "avscan";
         public static int ICAPPort = int.Parse(sICAPPort);
+
 
         AVScan()
         {
@@ -66,9 +63,6 @@ namespace ScannerAPI
             string s3uriString = req.Query["s3uri"];
             string useFileCache = req.Query["usefilecache"];
 
-            MemoryStream responseMemoryStream;
-            FileStream responseFileStream;
-
             //To add/replace support for accepting a file directly, instead of pulling a blob pass the
             //file into a memory or file stream here
 
@@ -93,7 +87,7 @@ namespace ScannerAPI
                     Scanner scan = new Scanner();
 
                     if (useFileCache == bool.TrueString)  //Determine if we need to use a memory (default) or file stream to cache the file
-                    { 
+                    {
                         ScanResult = scan.scanCachedFile(urlToScan, log);
                     }
                     else
@@ -111,64 +105,13 @@ namespace ScannerAPI
                 }
                 else if (s3uriString != null)
                 {
+
                     //Got an S3 URI
-
-                    string fileName = Path.GetFileName(s3uriString);
-
-                    AmazonS3Client s3Client = new AmazonS3Client();
-                    GetObjectRequest s3GetRequest = new GetObjectRequest();
-
-                    Uri s3uri = new Uri(s3uriString);
-
-                    s3GetRequest.BucketName = s3uri.Host;
-
-                    char[] trimChars = { '/' };
-                    s3GetRequest.Key = System.Net.WebUtility.UrlDecode(s3uri.AbsolutePath.Trim(trimChars)); //need to remove leading or trailing slashes
-
-                    log.LogInformation("Got URI: " + s3uriString + ", bucket=" + s3uri.Host + ", key=" + s3uri.AbsolutePath.Trim(trimChars));
-
-                    if (useFileCache == bool.TrueString)  //Scan S3 URI using File Cache
-                    {
-
-                        //First download the file to temporary
-                        string tempFileName = Path.GetTempFileName();
-                        log.LogInformation("  Using File Cache " + tempFileName);
-
-                        FileStream fs = File.Create(tempFileName);
-                        fs.Close();
-
-                        Amazon.S3.Transfer.TransferUtility ftu = new Amazon.S3.Transfer.TransferUtility(s3Client);
-                        ftu.Download(tempFileName, s3uri.Host, s3uri.AbsolutePath.Trim(trimChars));
-
-                        responseFileStream = new FileStream(tempFileName, FileMode.Open);
-                        ScanResult = icapper.scanStream(responseFileStream, s3GetRequest.Key);
-                        jsonScanResultString = JsonConvert.SerializeObject(ScanResult);
-
-                        responseFileStream.Close();
-                        responseFileStream.Dispose();
-                        File.Delete(tempFileName);
-
-                    }
-                    else //Scan S3 URI using Memory Cache
-                    {
-                        log.LogInformation("  Using Memory Cache");
-
-                        GetObjectResponse response = await s3Client.GetObjectAsync(s3GetRequest);
-                        MemoryStream responseStream = new MemoryStream();
-                        response.ResponseStream.CopyTo(responseStream); //TODO: DELETE THIS COPY IF IT WORKS WITHOUT
-                        //response.Dispose();
-                        ScanResult = icapper.scanStream(responseStream, s3GetRequest.Key);
-                        jsonScanResultString = JsonConvert.SerializeObject(ScanResult);
-
-                        responseStream.Dispose();
-                    }
-
-                    log.LogInformation(jsonScanResultString);
-
-                    icapper.Dispose();
-
-                    return new OkObjectResult(JsonConvert.SerializeObject(ScanResult));
+                    Scanner scanner = new Scanner();
+                    return (IActionResult)await scanner.scanUri(Path.GetFileName(s3uriString), useFileCache, log);
+                    
                 }
+                
                 else
                 {
                     return new OkObjectResult("Error: Did not receive any object to scan");
